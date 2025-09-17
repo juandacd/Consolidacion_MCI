@@ -66,7 +66,7 @@ def preprocess_data(df):
     
     # Detectar automáticamente la columna de líder
     columna_lider = None
-    posibles_lideres = ["Líder Principal", "LIDER DE DOCE", "Lider Principal", "LÍDER PRINCIPAL"]
+    posibles_lideres = ["Líder Principal", "LIDER DE DOCE", "Lider Principal", "LÍDER PRINCIPAL", "LIDER DE DOCE"]
     for col in posibles_lideres:
         if col in df.columns:
             columna_lider = col
