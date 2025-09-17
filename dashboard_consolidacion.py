@@ -64,6 +64,23 @@ def preprocess_data(df):
     # Limpiar nombres de columnas
     df.columns = df.columns.str.strip()
     
+    # Detectar automáticamente la columna de líder
+    columna_lider = None
+    posibles_lideres = ["Líder Principal", "LIDER DE DOCE", "Lider Principal", "LÍDER PRINCIPAL"]
+    for col in posibles_lideres:
+        if col in df.columns:
+            columna_lider = col
+            break
+    
+    # Detectar columna de reunión
+    columna_reunion = None
+    posibles_reuniones = ["¿A qué reunión viniste?", "¿A que reunión viniste?", "Reunión", "REUNION"]
+    for col in posibles_reuniones:
+        if col in df.columns:
+            columna_reunion = col
+            df["Reunion"] = df[col].str.strip()
+            break
+    
     # Procesar fecha con formato día/mes/año
     if "Marca temporal" in df.columns:
         # Intentar primero con formato día/mes/año
@@ -112,7 +129,7 @@ def preprocess_data(df):
             else:
                 df["Es_Fin_Semana"] = True
     
-    # Normalizar columnas de SI/NO
+    # Normalizar columnas de SI/NO (más flexible)
     columnas_sino = [
         "Llamada realizada y contestada (SI/NO)",
         "Ubicado en célula o Grupo Go! (SI/NO)", 
@@ -122,7 +139,26 @@ def preprocess_data(df):
     for col in columnas_sino:
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.upper()
-            df[col] = df[col].replace({"SÍ": "SI", "YES": "SI", "Y": "SI"})
+            # Normalizar diferentes variaciones de "SÍ"
+            df[col] = df[col].replace({
+                "SÍ": "SI", 
+                "SÌ": "SI",  # Acento grave
+                "SI": "SI",   # Ya correcto
+                "YES": "SI", 
+                "Y": "SI",
+                "S": "SI",
+                "1": "SI",
+                "TRUE": "SI"
+            })
+            # Normalizar "NO"
+            df[col] = df[col].replace({
+                "NO": "NO",   # Ya correcto
+                "N": "NO",
+                "0": "NO",
+                "FALSE": "NO",
+                "SIN GESTIÓN": "NO",
+                "SIN GESTION": "NO"
+            })
     
     # Normalizar grupos de edad
     if "Tú eres:" in df.columns:
@@ -133,15 +169,29 @@ def preprocess_data(df):
         df["Barrio"] = df["¿En qué barrio vives?"].str.strip().str.title()
         df["Barrio"] = df["Barrio"].fillna("No especificado")
     
-    return df
+    return df, columna_lider, columna_reunion
 
-df = preprocess_data(df)
+df, columna_lider, columna_reunion = preprocess_data(df)
 
 # --------------------------
 # 4. Información de datos y filtros
 # --------------------------
 # Mostrar información de los datos cargados
 st.info(f"📊 **Datos cargados:** {len(df)} registros totales")
+
+# Mostrar información de las columnas detectadas
+col_info = []
+if "Marca temporal" in df.columns:
+    col_info.append("✅ Marca temporal")
+if columna_lider:
+    col_info.append(f"✅ Líder: {columna_lider}")
+if columna_reunion:
+    col_info.append(f"✅ Reunión: {columna_reunion}")
+if "Grupo_Edad" in df.columns:
+    col_info.append("✅ Grupo de edad")
+
+if col_info:
+    st.info(f"🔍 **Columnas detectadas:** {' | '.join(col_info)}")
 
 # Mostrar rango de fechas (solo para fechas válidas)
 if not df.empty and "Marca temporal" in df.columns:
@@ -249,12 +299,19 @@ with st.sidebar:
     else:
         grupo_seleccionado = "Todos"
     
-    # Filtro por líder
-    if "Líder Principal" in df.columns:
-        lideres = ["Todos"] + list(df["Líder Principal"].dropna().unique())
-        lider_seleccionado = st.selectbox("👨‍💼 Líder Principal:", lideres)
+    # Filtro por líder (dinámico según la base de datos)
+    if columna_lider:
+        lideres = ["Todos"] + list(df[columna_lider].dropna().unique())
+        lider_seleccionado = st.selectbox(f"👨‍💼 {columna_lider}:", lideres)
     else:
         lider_seleccionado = "Todos"
+    
+    # Filtro por reunión (nuevo)
+    if columna_reunion:
+        reuniones = ["Todas"] + list(df["Reunion"].dropna().unique())
+        reunion_seleccionada = st.selectbox("🏛️ Reunión:", reuniones)
+    else:
+        reunion_seleccionada = "Todas"
 
 # Aplicar filtros (solo a registros con fechas válidas para filtros temporales)
 df_filtrado = df.copy()
@@ -281,9 +338,13 @@ if usar_filtro_meses and "Mes" in df.columns and not df["Mes"].isna().all():
 if grupo_seleccionado != "Todos" and "Grupo_Edad" in df.columns:
     df_filtrado = df_filtrado[df_filtrado["Grupo_Edad"] == grupo_seleccionado]
 
-# Filtro por líder
-if lider_seleccionado != "Todos" and "Líder Principal" in df.columns:
-    df_filtrado = df_filtrado[df_filtrado["Líder Principal"] == lider_seleccionado]
+# Filtro por líder (dinámico)
+if lider_seleccionado != "Todos" and columna_lider:
+    df_filtrado = df_filtrado[df_filtrado[columna_lider] == lider_seleccionado]
+
+# Filtro por reunión (nuevo)
+if reunion_seleccionada != "Todas" and columna_reunion:
+    df_filtrado = df_filtrado[df_filtrado["Reunion"] == reunion_seleccionada]
 
 # --------------------------
 # 5. Métricas principales
@@ -296,6 +357,8 @@ if usar_filtro_meses:
     rango_texto += f" | Meses: {mes_inicio} - {mes_fin}"
 else:
     rango_texto += " | Todos los meses"
+if reunion_seleccionada != "Todas":
+    rango_texto += f" | Reunión: {reunion_seleccionada}"
 
 st.header(f"📊 Resumen General")
 st.caption(rango_texto)
@@ -390,11 +453,11 @@ with tab3:
 # --------------------------
 # 7. Análisis por líder
 # --------------------------
-if "Líder Principal" in df_filtrado.columns:
-    st.header("👨‍💼 Análisis por Líder Principal")
+if columna_lider:
+    st.header(f"👨‍💼 Análisis por {columna_lider}")
     
     # Crear métricas por líder
-    lideres_stats = df_filtrado.groupby("Líder Principal").agg({
+    lideres_stats = df_filtrado.groupby(columna_lider).agg({
         "Nombres y apellidos completos": "count",
         "Llamada realizada y contestada (SI/NO)": lambda x: (x == "SI").sum(),
         "Ubicado en célula o Grupo Go! (SI/NO)": lambda x: (x == "SI").sum(),
@@ -416,7 +479,7 @@ if "Líder Principal" in df_filtrado.columns:
             lideres_stats,
             x="Líder",
             y=["Nuevos", "Llamadas", "Célula", "Visitas"],
-            title="Gestión por Líder Principal",
+            title=f"Gestión por {columna_lider}",
             barmode="group"
         )
         fig_lideres.update_layout(xaxis_title="Líder", yaxis_title="Cantidad")
@@ -425,15 +488,23 @@ if "Líder Principal" in df_filtrado.columns:
     with col2:
         st.subheader("📊 Tabla Resumen")
         st.dataframe(lideres_stats, use_container_width=True)
+else:
+    st.header("👨‍💼 Análisis por Líder")
+    st.warning("⚠️ No se encontró columna de líderes en los datos")
 
 # --------------------------
 # 8. Análisis adicional
 # --------------------------
 st.header("🔍 Análisis Adicional")
 
-col1, col2 = st.columns(2)
+# Crear columnas dinámicamente según los datos disponibles
+num_cols = 2
+if columna_reunion:
+    num_cols = 3
 
-with col1:
+cols = st.columns(num_cols)
+
+with cols[0]:
     # Distribución por grupo de edad
     if "Grupo_Edad" in df_filtrado.columns:
         grupos_dist = df_filtrado["Grupo_Edad"].value_counts()
@@ -444,7 +515,7 @@ with col1:
         )
         st.plotly_chart(fig_grupos, use_container_width=True)
 
-with col2:
+with cols[1]:
     # Top 10 barrios
     if "Barrio" in df_filtrado.columns:
         barrios_top = df_filtrado["Barrio"].value_counts().head(10)
@@ -457,6 +528,55 @@ with col2:
         )
         st.plotly_chart(fig_barrios, use_container_width=True)
 
+# Si hay información de reuniones, mostrar análisis adicional
+if columna_reunion and num_cols == 3:
+    with cols[2]:
+        # Distribución por reunión
+        reunion_dist = df_filtrado["Reunion"].value_counts()
+        fig_reunion = px.pie(
+            values=reunion_dist.values,
+            names=reunion_dist.index,
+            title="Distribución por Reunión"
+        )
+        st.plotly_chart(fig_reunion, use_container_width=True)
+
+# Análisis cruzado por reunión (si existe)
+if columna_reunion:
+    st.subheader("🏛️ Análisis por Reunión")
+    
+    # Métricas por reunión
+    reunion_stats = df_filtrado.groupby("Reunion").agg({
+        "Nombres y apellidos completos": "count",
+        "Llamada realizada y contestada (SI/NO)": lambda x: (x == "SI").sum(),
+        "Ubicado en célula o Grupo Go! (SI/NO)": lambda x: (x == "SI").sum(),
+        "Visita realizada (SI/NO)": lambda x: (x == "SI").sum()
+    }).reset_index()
+    
+    reunion_stats.columns = ["Reunión", "Nuevos", "Llamadas", "Célula", "Visitas"]
+    
+    # Calcular porcentajes
+    reunion_stats["% Llamadas"] = (reunion_stats["Llamadas"] / reunion_stats["Nuevos"] * 100).round(1)
+    reunion_stats["% Célula"] = (reunion_stats["Célula"] / reunion_stats["Nuevos"] * 100).round(1)
+    reunion_stats["% Visitas"] = (reunion_stats["Visitas"] / reunion_stats["Nuevos"] * 100).round(1)
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Gráfico de barras por reunión
+        fig_reunion_stats = px.bar(
+            reunion_stats,
+            x="Reunión",
+            y=["Nuevos", "Llamadas", "Célula", "Visitas"],
+            title="Gestión por Reunión",
+            barmode="group"
+        )
+        fig_reunion_stats.update_layout(xaxis_title="Reunión", yaxis_title="Cantidad")
+        st.plotly_chart(fig_reunion_stats, use_container_width=True)
+    
+    with col2:
+        st.subheader("📊 Resumen por Reunión")
+        st.dataframe(reunion_stats, use_container_width=True)
+
 # --------------------------
 # 9. Datos detallados
 # --------------------------
@@ -464,16 +584,22 @@ with st.expander("📋 Ver Datos Detallados"):
     st.subheader(f"Datos Filtrados ({len(df_filtrado)} registros)")
     
     # Seleccionar columnas relevantes para mostrar
-    columnas_mostrar = [
+    columnas_base = [
         "Marca temporal", "Nombres y apellidos completos", 
         "No. de Celular", "Tú eres:", "Quién te Invito?", 
-        "Líder Principal", "¿En qué barrio vives?",
+        "¿En qué barrio vives?",
         "Llamada realizada y contestada (SI/NO)",
         "Ubicado en célula o Grupo Go! (SI/NO)",
         "Visita realizada (SI/NO)"
     ]
     
-    columnas_disponibles = [col for col in columnas_mostrar if col in df_filtrado.columns]
+    # Agregar columnas dinámicamente detectadas
+    if columna_lider:
+        columnas_base.append(columna_lider)
+    if columna_reunion:
+        columnas_base.append(columna_reunion)
+    
+    columnas_disponibles = [col for col in columnas_base if col in df_filtrado.columns]
     st.dataframe(df_filtrado[columnas_disponibles], use_container_width=True)
     
     # Botón para descargar
