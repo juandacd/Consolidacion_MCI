@@ -64,9 +64,21 @@ def preprocess_data(df):
     # Limpiar nombres de columnas
     df.columns = df.columns.str.strip()
     
+    # Filtrar registros con nombres válidos (no vacíos, no nulos)
+    if "Nombres y apellidos completos" in df.columns:
+        # Crear máscara para nombres válidos
+        nombres_validos = df["Nombres y apellidos completos"].notna() & (df["Nombres y apellidos completos"].str.strip() != "")
+        df = df[nombres_validos].copy()
+        
+        # Mostrar cuántos registros se filtraron
+        registros_filtrados = len(df)
+        st.info(f"📋 **Registros con nombres válidos:** {registros_filtrados}")
+    else:
+        st.warning("⚠️ No se encontró la columna 'Nombres y apellidos completos'")
+    
     # Detectar automáticamente la columna de líder
     columna_lider = None
-    posibles_lideres = ["Líder Principal", "LIDER DE DOCE", "Lider Principal", "LÍDER PRINCIPAL", "LIDER DE DOCE"]
+    posibles_lideres = ["Líder Principal", "LIDER DE DOCE", "Lider Principal", "LÍDER PRINCIPAL"]
     for col in posibles_lideres:
         if col in df.columns:
             columna_lider = col
@@ -79,6 +91,20 @@ def preprocess_data(df):
         if col in df.columns:
             columna_reunion = col
             df["Reunion"] = df[col].str.strip()
+            break
+    
+    # Detectar columna de notas
+    columna_notas = None
+    posibles_notas = [
+        "Nota respecto a la Llamada y Visita",
+        "Nota respecto a la llamada y visita", 
+        "Notas",
+        "Observaciones",
+        "Comentarios"
+    ]
+    for col in posibles_notas:
+        if col in df.columns:
+            columna_notas = col
             break
     
     # Procesar fecha con formato día/mes/año
@@ -169,9 +195,9 @@ def preprocess_data(df):
         df["Barrio"] = df["¿En qué barrio vives?"].str.strip().str.title()
         df["Barrio"] = df["Barrio"].fillna("No especificado")
     
-    return df, columna_lider, columna_reunion
+    return df, columna_lider, columna_reunion, columna_notas
 
-df, columna_lider, columna_reunion = preprocess_data(df)
+df, columna_lider, columna_reunion, columna_notas = preprocess_data(df)
 
 # --------------------------
 # 4. Información de datos y filtros
@@ -187,6 +213,8 @@ if columna_lider:
     col_info.append(f"✅ Líder: {columna_lider}")
 if columna_reunion:
     col_info.append(f"✅ Reunión: {columna_reunion}")
+if columna_notas:
+    col_info.append(f"✅ Notas: {columna_notas}")
 if "Grupo_Edad" in df.columns:
     col_info.append("✅ Grupo de edad")
 
@@ -598,9 +626,19 @@ with st.expander("📋 Ver Datos Detallados"):
         columnas_base.append(columna_lider)
     if columna_reunion:
         columnas_base.append(columna_reunion)
+    if columna_notas:
+        columnas_base.append(columna_notas)
     
     columnas_disponibles = [col for col in columnas_base if col in df_filtrado.columns]
+    
+    # Mostrar tabla con columnas ordenadas
     st.dataframe(df_filtrado[columnas_disponibles], use_container_width=True)
+    
+    # Mostrar información adicional sobre las notas si existen
+    if columna_notas and columna_notas in df_filtrado.columns:
+        notas_con_contenido = df_filtrado[columna_notas].dropna()
+        notas_no_vacias = notas_con_contenido[notas_con_contenido.str.strip() != ""]
+        st.info(f"📝 **Registros con notas:** {len(notas_no_vacias)} de {len(df_filtrado)}")
     
     # Botón para descargar
     csv = df_filtrado.to_csv(index=False)
